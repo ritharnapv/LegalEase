@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { 
-  UploadCloud, FileText, Trash2, Eye, Search, 
-  Grid, List, CheckCircle, ArrowRight, RefreshCcw 
+import {
+  UploadCloud, FileText, Trash2, Eye, Search,
+  Grid, List, CheckCircle, ArrowRight, RefreshCcw, AlertCircle
 } from 'lucide-react';
 import { StorageService, Document } from '../services/storage';
+import { api } from '../services/api';
 import { useToast } from '../contexts/ToastContext';
 import { useNavigate } from 'react-router-dom';
+import { ShareButton } from '../components/ShareButton';
+import { WhatsAppShareModal } from '../components/WhatsAppShareModal';
 
 export function DocumentsPage() {
   const [isDragging, setIsDragging] = useState(false);
@@ -13,6 +16,7 @@ export function DocumentsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<'All' | 'PDF' | 'DOCX' | 'TXT'>('All');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [shareDoc, setShareDoc] = useState<Document | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -22,30 +26,42 @@ export function DocumentsPage() {
     setDocuments(StorageService.getDocuments());
   }, []);
 
+  /** Upload each file to the backend for real AI extraction. */
   const processFiles = (files: FileList) => {
-    Array.from(files).forEach((file) => {
+    Array.from(files).forEach(async (file) => {
       const fileExtension = file.name.split('.').pop()?.toLowerCase() || 'txt';
-      
+
       const newDoc: Document = {
         id: `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         name: file.name,
         type: fileExtension,
         size: file.size,
         uploadDate: new Date().toISOString(),
-        status: 'processing'
+        status: 'processing',
       };
 
-      // Save to StorageService and update state
       StorageService.saveDocument(newDoc);
       setDocuments(StorageService.getDocuments());
       showToast(`Uploading "${file.name}"...`, 'info');
 
-      // Simulate AI Processing completion after 3 seconds
-      setTimeout(() => {
-        StorageService.updateDocumentStatus(newDoc.id, 'processed');
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const data = await api.upload<{ filename: string; text: string }>('/upload', formData);
+
+        newDoc.status = 'processed';
+        newDoc.processedDate = new Date().toISOString();
+        newDoc.extractedText = data.text;
+        StorageService.saveDocument(newDoc);
         setDocuments(StorageService.getDocuments());
-        showToast(`Document "${file.name}" successfully analyzed by AI!`, 'success');
-      }, 3000);
+        showToast(`Document "${data.filename}" successfully analyzed by AI!`, 'success');
+      } catch {
+        newDoc.status = 'error';
+        StorageService.saveDocument(newDoc);
+        setDocuments(StorageService.getDocuments());
+        showToast(`Failed to process "${file.name}". Please try again.`, 'error');
+      }
     });
   };
 
@@ -270,9 +286,8 @@ export function DocumentsPage() {
             /* GRID VIEW */
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredDocs.map((doc) => {
-                const isProcessing = doc.status === 'processing';
                 const typeInfo = getDocTypeDetails(doc.type);
-                
+
                 return (
                   <div 
                     key={doc.id} 
@@ -288,10 +303,15 @@ export function DocumentsPage() {
                           {doc.type}
                         </span>
                         
-                        {isProcessing ? (
+                        {doc.status === 'processing' ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 animate-pulse">
                             <RefreshCcw size={10} className="animate-spin" />
                             AI Auditing
+                          </span>
+                        ) : doc.status === 'error' ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 border border-red-500/20">
+                            <AlertCircle size={10} />
+                            Failed
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
@@ -326,19 +346,27 @@ export function DocumentsPage() {
 
                     {/* Action footer */}
                     <div className="p-4 bg-gray-50/50 dark:bg-gray-950/20 border-t border-gray-150 dark:border-gray-800/80 flex items-center justify-between gap-3">
-                      <button
-                        onClick={() => handleDelete(doc.id, doc.name)}
-                        className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
-                        aria-label={`Delete ${doc.name}`}
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleDelete(doc.id, doc.name)}
+                          className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                          aria-label={`Delete ${doc.name}`}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                        {/* WhatsApp Share button */}
+                        <ShareButton
+                          document={doc}
+                          onShare={setShareDoc}
+                          variant="icon"
+                        />
+                      </div>
 
                       <button
                         onClick={() => handleReviewDetails(doc)}
                         className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg border border-gray-250 dark:border-gray-800 hover:border-primary-500 hover:bg-primary-500 hover:text-white transition-all`}
                       >
-                        {isProcessing ? (
+                        {doc.status === 'processing' ? (
                           <>
                             <span>View Progress</span>
                             <ArrowRight size={12} className="animate-pulse" />
@@ -372,9 +400,8 @@ export function DocumentsPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-150 dark:divide-gray-800">
                     {filteredDocs.map((doc) => {
-                      const isProcessing = doc.status === 'processing';
                       const typeInfo = getDocTypeDetails(doc.type);
-                      
+
                       return (
                         <tr key={doc.id} className="hover:bg-gray-50 dark:hover:bg-gray-950/40 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap">
@@ -403,10 +430,15 @@ export function DocumentsPage() {
                             {formatDate(doc.uploadDate)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            {isProcessing ? (
+                            {doc.status === 'processing' ? (
                               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 animate-pulse">
                                 <RefreshCcw size={10} className="animate-spin" />
                                 Processing
+                              </span>
+                            ) : doc.status === 'error' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 border border-red-500/20">
+                                <AlertCircle size={10} />
+                                Failed
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
@@ -416,7 +448,7 @@ export function DocumentsPage() {
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold">
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-end gap-1">
                               <button
                                 onClick={() => handleReviewDetails(doc)}
                                 className="p-2 text-gray-400 hover:text-primary-500 dark:hover:text-white hover:bg-primary-500/10 rounded-lg transition-colors"
@@ -424,6 +456,12 @@ export function DocumentsPage() {
                               >
                                 <Eye size={16} />
                               </button>
+                              {/* WhatsApp Share button — list view */}
+                              <ShareButton
+                                document={doc}
+                                onShare={setShareDoc}
+                                variant="icon"
+                              />
                               <button
                                 onClick={() => handleDelete(doc.id, doc.name)}
                                 className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
@@ -459,6 +497,12 @@ export function DocumentsPage() {
         )}
 
       </div>
+
+      {/* WhatsApp Share Modal — portal-rendered above everything */}
+      <WhatsAppShareModal
+        document={shareDoc}
+        onClose={() => setShareDoc(null)}
+      />
     </div>
   );
 }

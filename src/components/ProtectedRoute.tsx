@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
+
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
   const location = useLocation();
@@ -29,6 +30,24 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!isAuthenticated) {
     // Save target URL for redirect after successful login
     return <Navigate to="/login" state={{ from: location }} replace />;
+
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+}
+
+/**
+ * Wraps routes that require authentication.
+ * Redirects unauthenticated users to /login and preserves
+ * the originally-requested path so they can be sent back
+ * after a successful login.
+ */
+export function ProtectedRoute({ children }: ProtectedRouteProps) {
+  const { isAuthenticated } = useAuth();
+  const location = useLocation();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+
   }
 
   return <>{children}</>;
