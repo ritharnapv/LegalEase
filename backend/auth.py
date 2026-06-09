@@ -31,13 +31,7 @@ ACCESS_TOKEN_EXPIRE_HOURS = 24
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 
-def _require_secret_key() -> str:
-    if not SECRET_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication service unavailable.",
-        )
-    return SECRET_KEY
+
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
